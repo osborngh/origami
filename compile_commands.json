@@ -1,0 +1,20 @@
+[
+ {
+  "directory": "/home/osborn/dev/c/origami",
+  "arguments": [
+   "clang",
+   "-Wall",
+   "-Wextra",
+   "-std=c11",
+   "-O2",
+   "-fPIC",
+   "-I",
+   "./include",
+   "-c",
+   "src/og_renderer.c",
+   "-o",
+   "lib/og_renderer.o"
+  ],
+  "file": "src/og_renderer.c"
+ }
+]
