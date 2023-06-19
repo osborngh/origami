@@ -59,7 +59,8 @@ void _init_vulkan(OGContext *og_ctx, OGConfig *og_cfg) {
 	}
 	OG_CHECK_VK(vkCreateInstance(&instance_info, NULL, &og_ctx->instance), "Vulkan Instance Creation Failed");
 
-	PFN_vkCreateDebugUtilsMessengerEXT func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(og_ctx->instance, "vkCreateDebugUtilsMessengerEXT");
+	PFN_vkCreateDebugUtilsMessengerEXT func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+			og_ctx->instance, "vkCreateDebugUtilsMessengerEXT");
 
 	if (func) {
 		VkDebugUtilsMessengerCreateInfoEXT debug_info = {};
@@ -103,7 +104,8 @@ void _choose_physical_device(OGContext *og_ctx) {
 		for (uint32_t j = 0; j < queue_family_count; j++) {
 			if (queue_properties[j].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
 				VkBool32 surface_support = VK_FALSE;
-				OG_CHECK_VK(vkGetPhysicalDeviceSurfaceSupportKHR(p_device, j, og_ctx->surface, &surface_support), "Physical Device Surface Support Not Available");
+				OG_CHECK_VK(vkGetPhysicalDeviceSurfaceSupportKHR(p_device, j,
+							og_ctx->surface, &surface_support), "Physical Device Surface Support Not Available");
 
 				if (surface_support) {
 					og_ctx->graphics_idx = j;
@@ -137,13 +139,15 @@ void _create_logical_device(OGContext *og_ctx) {
 	device_info.enabledExtensionCount = OG_ARR_SIZE(extensions);
 	device_info.ppEnabledExtensionNames = extensions;
 
-	OG_CHECK_VK(vkCreateDevice(og_ctx->physical_device, &device_info, NULL, &og_ctx->logical_device), "Logical Device Creation Failed");
+	OG_CHECK_VK(vkCreateDevice(og_ctx->physical_device, &device_info, NULL,
+				&og_ctx->logical_device), "Logical Device Creation Failed");
 }
 
 void _create_swapchain(OGContext *og_ctx) {
 
 	VkSurfaceCapabilitiesKHR surf_caps = {};
-	OG_CHECK_VK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(og_ctx->physical_device, og_ctx->surface, &surf_caps), "Surface Capabilities Not Available");
+	OG_CHECK_VK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(og_ctx->physical_device,
+				og_ctx->surface, &surf_caps), "Surface Capabilities Not Available");
 
 	VkSwapchainCreateInfoKHR sc_info = {};
 	sc_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -166,6 +170,7 @@ void og_init(OGContext *og_ctx, OGConfig *og_cfg) {
 
 	_choose_physical_device(og_ctx);
 	_create_logical_device(og_ctx);
+	_create_swapchain(og_ctx);
 
 	og_ctx->running = true;
 }
