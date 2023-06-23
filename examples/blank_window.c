@@ -17,6 +17,7 @@ int main() {
 
 	while (p_ctx->running) {
 		og_poll_events(&ctx);
+		// og_render(&ctx);
 
 		// Your Drawing Goes In Here
 

@@ -3,6 +3,9 @@
  */
 
 #include "origami/og_renderer.h"
+#include "origami/common.h"
+#include <stdint.h>
+#include <vulkan/vulkan_core.h>
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL __debug_callback(
 		VkDebugUtilsMessageSeverityFlagBitsEXT msgSeverity,
@@ -42,13 +45,13 @@ void _init_vulkan(OGContext *og_ctx, OGConfig *og_cfg) {
 		"VK_LAYER_KHRONOS_validation",
 	};
 
-	uint32_t glfw_extc = 0;
-	const char** glfw_ext = glfwGetRequiredInstanceExtensions(&glfw_extc);
+	uint32_t glfw_ext_c = 0;
+	const char** glfw_ext = glfwGetRequiredInstanceExtensions(&glfw_ext_c);
 
 	VkInstanceCreateInfo instance_info = {};
 	instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	instance_info.pApplicationInfo = &app_info;
-	instance_info.enabledExtensionCount = glfw_extc;
+	instance_info.enabledExtensionCount = glfw_ext_c;
 	instance_info.ppEnabledExtensionNames = glfw_ext;
 
 	if (og_cfg->vd_layers) {
@@ -59,14 +62,16 @@ void _init_vulkan(OGContext *og_ctx, OGConfig *og_cfg) {
 	}
 	OG_CHECK_VK(vkCreateInstance(&instance_info, NULL, &og_ctx->instance), "Vulkan Instance Creation Failed");
 
-	PFN_vkCreateDebugUtilsMessengerEXT func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-			og_ctx->instance, "vkCreateDebugUtilsMessengerEXT");
+	PFN_vkCreateDebugUtilsMessengerEXT func = (PFN_vkCreateDebugUtilsMessengerEXT)
+		vkGetInstanceProcAddr(og_ctx->instance, "vkCreateDebugUtilsMessengerEXT");
 
 	if (func) {
 		VkDebugUtilsMessengerCreateInfoEXT debug_info = {};
 		debug_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-		debug_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-		debug_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+		debug_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+		debug_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 		debug_info.pfnUserCallback = __debug_callback;
 
 		func(og_ctx->instance, &debug_info, NULL, &og_ctx->debug_messenger);
@@ -87,18 +92,18 @@ void _choose_physical_device(OGContext *og_ctx) {
 	og_ctx->graphics_idx = -1;
 
 	uint32_t pd_count = 0;
-	VkPhysicalDevice pd_devices[5];
 	vkEnumeratePhysicalDevices(og_ctx->instance, &pd_count, NULL);
+	VkPhysicalDevice pd_devices[pd_count];
 
-	vkEnumeratePhysicalDevices(og_ctx->instance, &pd_count, pd_devices);
+	OG_CHECK_VK(vkEnumeratePhysicalDevices(og_ctx->instance, &pd_count, pd_devices), "Enumerate Physical Device Failed");
 
 	for (uint32_t i = 0; i < pd_count; i++) {
 		VkPhysicalDevice p_device = pd_devices[i];
 
 		uint32_t queue_family_count = 0;
-		VkQueueFamilyProperties queue_properties[10];
-
 		vkGetPhysicalDeviceQueueFamilyProperties(p_device, &queue_family_count, NULL);
+
+		VkQueueFamilyProperties queue_properties[queue_family_count];
 		vkGetPhysicalDeviceQueueFamilyProperties(p_device, &queue_family_count, queue_properties);
 
 		for (uint32_t j = 0; j < queue_family_count; j++) {
@@ -121,7 +126,7 @@ void _choose_physical_device(OGContext *og_ctx) {
 }
 
 void _create_logical_device(OGContext *og_ctx) {
-	const char* extensions[] = {
+	const char* extensions[1] = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME
 	};
 
@@ -141,13 +146,48 @@ void _create_logical_device(OGContext *og_ctx) {
 
 	OG_CHECK_VK(vkCreateDevice(og_ctx->physical_device, &device_info, NULL,
 				&og_ctx->logical_device), "Logical Device Creation Failed");
+
+	vkGetDeviceQueue(og_ctx->logical_device, og_ctx->graphics_idx, 0, &og_ctx->graphics_queue);
 }
 
 void _create_swapchain(OGContext *og_ctx) {
-
 	VkSurfaceCapabilitiesKHR surf_caps = {};
 	OG_CHECK_VK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(og_ctx->physical_device,
 				og_ctx->surface, &surf_caps), "Surface Capabilities Not Available");
+
+	uint32_t format_count = 0;
+	vkGetPhysicalDeviceSurfaceFormatsKHR(og_ctx->physical_device, og_ctx->surface, &format_count, 0);
+
+	VkSurfaceFormatKHR surf_formats[format_count];
+	OG_CHECK_VK(vkGetPhysicalDeviceSurfaceFormatsKHR(og_ctx->physical_device,
+				og_ctx->surface, &format_count, surf_formats), "Surface Formats Not Available");
+
+	for (uint32_t i = 0; i < format_count; i++) {
+		VkSurfaceFormatKHR surf_format = surf_formats[i];
+
+		if (surf_format.format == VK_FORMAT_B8G8R8A8_SRGB) {
+			og_ctx->surf_format = surf_format;
+			break; }
+	}
+
+	VkPresentModeKHR present_mode = 0;
+
+	uint32_t present_mode_count = 0;
+	vkGetPhysicalDeviceSurfacePresentModesKHR(og_ctx->physical_device, og_ctx->surface, &present_mode_count, 0);
+	VkPresentModeKHR present_modes[present_mode_count];
+
+	OG_CHECK_VK(vkGetPhysicalDeviceSurfacePresentModesKHR(og_ctx->physical_device,
+				og_ctx->surface, &present_mode_count, present_modes), "Surface Present Mode Get Failed");
+
+	for (uint32_t i = 0; i < present_mode_count; i++) {
+		if (present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+			present_mode = present_modes[i];
+			break;
+		// Guaranteed To Be Present By Standard
+		} else if (present_modes[i] == VK_PRESENT_MODE_FIFO_KHR) {
+			present_mode = present_modes[i];
+		}
+	}
 
 	VkSwapchainCreateInfoKHR sc_info = {};
 	sc_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -155,25 +195,96 @@ void _create_swapchain(OGContext *og_ctx) {
 	sc_info.surface = og_ctx->surface;
 	sc_info.preTransform = surf_caps.currentTransform;
 	sc_info.imageExtent = surf_caps.currentExtent;
-	sc_info.minImageCount = (surf_caps.minImageCount + 1) > surf_caps.maxImageCount ?
-		sc_info.minImageCount - 1 : sc_info.minImageCount;
+	sc_info.minImageCount = surf_caps.minImageCount + 1;
+	sc_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	sc_info.imageArrayLayers = 1;
+	sc_info.imageFormat = og_ctx->surf_format.format;
+	sc_info.imageColorSpace = og_ctx->surf_format.colorSpace;
+	sc_info.presentMode = present_mode;
+	sc_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	sc_info.queueFamilyIndexCount = 0;
+	sc_info.pQueueFamilyIndices = &og_ctx->graphics_idx;
+	sc_info.clipped = VK_TRUE;
+	sc_info.oldSwapchain = VK_NULL_HANDLE;
 
-	OG_CHECK_VK(vkCreateSwapchainKHR(og_ctx->logical_device, &sc_info, NULL, &og_ctx->swapchain), "SwapChain Creation Failed");
+	OG_CHECK_VK(vkCreateSwapchainKHR(og_ctx->logical_device, &sc_info,
+				NULL, &og_ctx->swapchain), "SwapChain Creation Failed");
+
+	uint32_t sc_img_count = 0;
+	vkGetSwapchainImagesKHR(og_ctx->logical_device, og_ctx->swapchain, &sc_img_count, 0);
+
+	vkGetSwapchainImagesKHR(og_ctx->logical_device, og_ctx->swapchain, &sc_img_count, og_ctx->sc_images);
 }
-
 
 void og_init(OGContext *og_ctx, OGConfig *og_cfg) {
 	_init_window(og_ctx, og_cfg);
 	_init_vulkan(og_ctx, og_cfg);
-
 	_create_surface(og_ctx);
 
 	_choose_physical_device(og_ctx);
 	_create_logical_device(og_ctx);
+
 	_create_swapchain(og_ctx);
+	_create_command_pool(og_ctx);
 
 	og_ctx->running = true;
 }
+
+void _create_command_pool(OGContext *og_ctx) {
+	VkCommandPoolCreateInfo pool_create_info = {};
+	pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	pool_create_info.queueFamilyIndex = og_ctx->graphics_idx;
+
+	OG_CHECK_VK(vkCreateCommandPool(og_ctx->logical_device, &pool_create_info, NULL, &og_ctx->command_pool), "Command Pool Creation Failed");
+}
+
+void og_render(OGContext *og_ctx /* Function Pointer to Render */) {
+	uint32_t img_idx = 0;
+	
+	OG_CHECK_VK(vkAcquireNextImageKHR(og_ctx->logical_device, og_ctx->swapchain, 0, 0, 0, &img_idx), "Image Acquisition Failed");
+
+	VkCommandBufferAllocateInfo cmd_alloc_info = {};
+	cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	cmd_alloc_info.commandBufferCount = 1;
+	cmd_alloc_info.commandPool = og_ctx->command_pool;
+	cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+	VkCommandBuffer cmd_buffer = NULL;
+	OG_CHECK_VK(vkAllocateCommandBuffers(og_ctx->logical_device, &cmd_alloc_info, &cmd_buffer), "Command Buffer Allocation Failed");
+
+	VkCommandBufferBeginInfo cb_begin_info = {};
+	cb_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	cb_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	
+	OG_CHECK_VK(vkBeginCommandBuffer(cmd_buffer, &cb_begin_info), "Command Buffer Begin Failed");
+
+	// Rendering
+	{
+		// custom_render();
+	}
+
+	OG_CHECK_VK(vkEndCommandBuffer(cmd_buffer), "Command Buffer End Failed");
+
+	VkSubmitInfo submit_info = {};
+	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit_info.commandBufferCount = 1;
+	submit_info.pCommandBuffers = &cmd_buffer;
+
+	OG_CHECK_VK(vkQueueSubmit(og_ctx->graphics_queue, 1, &submit_info, 0), "Queue Submit Failed");
+
+
+	VkPresentInfoKHR present_info = {};
+	present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	present_info.pSwapchains = &og_ctx->swapchain;
+	present_info.swapchainCount = 1;
+	present_info.pImageIndices = &img_idx;
+
+	OG_CHECK_VK(vkQueuePresentKHR(og_ctx->graphics_queue, &present_info), "Queue Present Failed");
+
+	vkDeviceWaitIdle(og_ctx->logical_device);
+	vkFreeCommandBuffers(og_ctx->logical_device, og_ctx->command_pool, 1, &cmd_buffer);
+}
+
 
 void og_poll_events(OGContext *og_ctx) {
 	glfwPollEvents();
@@ -182,9 +293,13 @@ void og_poll_events(OGContext *og_ctx) {
 }
 
 void og_quit(OGContext *og_ctx) {
+	vkDestroyCommandPool(og_ctx->logical_device, og_ctx->command_pool, NULL);
+
+	vkDestroySwapchainKHR(og_ctx->logical_device, og_ctx->swapchain, NULL);
 	vkDestroyDevice(og_ctx->logical_device, NULL);
 	vkDestroySurfaceKHR(og_ctx->instance, og_ctx->surface, NULL);
+
 	glfwDestroyWindow(og_ctx->window);
-	glfwTerminate();
 	vkDestroyInstance(og_ctx->instance, NULL);
+	glfwTerminate();
 }

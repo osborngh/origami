@@ -17,14 +17,20 @@ typedef struct {
 typedef struct {
 	GLFWwindow* window;
 	VkInstance instance;
-	VkSurfaceKHR surface;
 	VkDebugUtilsMessengerEXT debug_messenger;
 
-	int graphics_idx;
+	VkSurfaceKHR surface;
+	VkSurfaceFormatKHR surf_format;
+
 	VkPhysicalDevice physical_device;
 	VkDevice logical_device;
 	VkSwapchainKHR swapchain;
 
+	VkQueue graphics_queue;
+	VkImage sc_images[5];
+	VkCommandPool command_pool;
+
+	uint32_t graphics_idx;
 	bool running;
 } OGContext;
 
@@ -37,11 +43,13 @@ bool _main_loop(OGContext *og_ctx);
 void _handle_default_events(OGContext *og_ctx);
 void _choose_physical_device(OGContext *og_ctx);
 void _create_logical_device(OGContext *og_ctx);
+void _create_command_pool(OGContext *og_ctx);
 
 
 // Origami's API
 OG_API void og_init(OGContext *og_ctx, OGConfig *og_cfg);
 OG_API void og_poll_events(OGContext *og_ctx);
+OG_API void og_render(OGContext *og_ctx /* Function Pointer to Render */);
 OG_API void og_quit(OGContext *og_ctx);
 
 #endif // __OG_RENDERER_H__

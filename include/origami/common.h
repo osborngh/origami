@@ -25,7 +25,7 @@
 	printf("[INFO]: %s\n", msg); \
 
 #define OG_ARR_SIZE(arr) \
-	(int)sizeof(arr)/sizeof(arr[0])
+	sizeof((arr)) / sizeof((arr[0]))
 
 #define OG_LOG_INFOVAR(head, msg) \
 	printf("[%s]: %s\n", head, msg); \

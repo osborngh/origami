@@ -6,14 +6,14 @@ TARGET = ./build/app
 
 FILE = blank_window.c
 
-$(TARGET): $(FILE)
+all:
+	rm -rf ./build/*
 	mkdir -p build
 	make -C ../
-	$(CC) $(CFLAGS) $(INCLUDE) -o $(TARGET) $(FILE) -L../lib -lorigami $(LDFLAGS)
-	$(TARGET)
+	$(CC) $(CFLAGS) $(INCLUDE) -o $(TARGET) $(FILE) -L../lib -lorigami $(LDFLAGS) && $(TARGET)
 
-run:
-	$(TARGET)
+debug:
+	gdb -q $(TARGET)
 
 
 clean:
