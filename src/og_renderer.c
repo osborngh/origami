@@ -89,7 +89,6 @@ OG_API void og_render(OGContext *og_ctx, void (*render)(OGContext*)) {
 
 OG_API void og_poll_events(OGContext *og_ctx) {
 	glfwPollEvents();
-
 	_handle_default_events(og_ctx);
 }
 
