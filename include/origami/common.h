@@ -14,6 +14,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#define OG_API
+#define OG_INT
+
 #define OG_CHECK_VK(val, msg) \
 	if (val != VK_SUCCESS) \
 	printf("[VK_ERROR]: %s [CODE]: %d\n", msg, val); \
@@ -30,6 +33,5 @@
 #define OG_LOG_INFOVAR(head, msg) \
 	printf("[%s]: %s\n", head, msg); \
 
-#define OG_API
 
 #endif //__COMMON_H__

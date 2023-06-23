@@ -4,7 +4,7 @@ INCLUDE = -I ../include/
 LDFLAGS = -lglfw3 -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi -lm
 TARGET = ./build/app
 
-FILE = blank_window.c
+FILE = ./red_window.c
 
 all:
 	rm -rf ./build/*

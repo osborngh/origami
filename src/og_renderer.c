@@ -4,10 +4,110 @@
 
 #include "origami/og_renderer.h"
 #include "origami/common.h"
-#include <stdint.h>
 #include <vulkan/vulkan_core.h>
 
-static VKAPI_ATTR VkBool32 VKAPI_CALL __debug_callback(
+OG_API void og_init(OGContext *og_ctx, OGConfig *og_cfg) {
+	_init_window(og_ctx, og_cfg);
+	_init_vulkan(og_ctx, og_cfg);
+	_create_surface(og_ctx);
+
+	_choose_physical_device(og_ctx);
+	_create_logical_device(og_ctx);
+
+	_create_swapchain(og_ctx);
+	_create_command_pool(og_ctx);
+
+	_create_sync_objects(og_ctx);
+
+	og_ctx->running = true;
+}
+
+OG_API void og_clear_screen(OGContext *og_ctx, OGColor color) {
+	VkImageSubresourceRange range = {};
+	range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	range.layerCount = 1;
+	range.levelCount = 1;
+
+	vkCmdClearColorImage(og_ctx->curr_cmd_buffer, og_ctx->sc_images[og_ctx->img_idx],
+			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &color, 1, &range);
+}
+
+OG_API void og_render(OGContext *og_ctx, void (*render)(OGContext*)) {
+	OG_CHECK_VK(vkAcquireNextImageKHR(og_ctx->logical_device, og_ctx->swapchain, 0, og_ctx->acquire_img_semaphore, 0, &og_ctx->img_idx), "Image Acquisition Failed");
+
+	VkCommandBufferAllocateInfo cmd_alloc_info = {};
+	cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	cmd_alloc_info.commandBufferCount = 1;
+	cmd_alloc_info.commandPool = og_ctx->command_pool;
+	cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+	OG_CHECK_VK(vkAllocateCommandBuffers(og_ctx->logical_device,
+				&cmd_alloc_info, &og_ctx->curr_cmd_buffer), "Command Buffer Allocation Failed");
+
+	VkCommandBufferBeginInfo cb_begin_info = {};
+	cb_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	cb_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	
+	OG_CHECK_VK(vkBeginCommandBuffer(og_ctx->curr_cmd_buffer, &cb_begin_info), "Command Buffer Begin Failed");
+
+	// Rendering
+	{
+		render(og_ctx);
+	}
+
+	OG_CHECK_VK(vkEndCommandBuffer(og_ctx->curr_cmd_buffer), "Command Buffer End Failed");
+
+	VkPipelineStageFlags wdst_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+	VkSubmitInfo submit_info = {};
+	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit_info.commandBufferCount = 1;
+	submit_info.pCommandBuffers = &og_ctx->curr_cmd_buffer;
+	submit_info.pSignalSemaphores = &og_ctx->submit_semaphore;
+	submit_info.signalSemaphoreCount = 1;
+	submit_info.pWaitSemaphores = &og_ctx->acquire_img_semaphore;
+	submit_info.waitSemaphoreCount = 1;
+	submit_info.pWaitDstStageMask = &wdst_stage_mask;
+
+	OG_CHECK_VK(vkQueueSubmit(og_ctx->graphics_queue, 1, &submit_info, 0), "Queue Submit Failed");
+
+
+	VkPresentInfoKHR present_info = {};
+	present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	present_info.pSwapchains = &og_ctx->swapchain;
+	present_info.swapchainCount = 1;
+	present_info.pImageIndices = &og_ctx->img_idx;
+	present_info.pWaitSemaphores = &og_ctx->submit_semaphore;
+	present_info.waitSemaphoreCount = 1;
+
+	OG_CHECK_VK(vkQueuePresentKHR(og_ctx->graphics_queue, &present_info), "Queue Present Failed");
+
+	vkDeviceWaitIdle(og_ctx->logical_device);
+	vkFreeCommandBuffers(og_ctx->logical_device, og_ctx->command_pool, 1, &og_ctx->curr_cmd_buffer);
+}
+
+
+OG_API void og_poll_events(OGContext *og_ctx) {
+	glfwPollEvents();
+
+	_handle_default_events(og_ctx);
+}
+
+OG_API void og_quit(OGContext *og_ctx) {
+	vkDestroySemaphore(og_ctx->logical_device, og_ctx->acquire_img_semaphore, NULL);
+	vkDestroySemaphore(og_ctx->logical_device, og_ctx->submit_semaphore, NULL);
+
+	vkDestroyCommandPool(og_ctx->logical_device, og_ctx->command_pool, NULL);
+	vkDestroySwapchainKHR(og_ctx->logical_device, og_ctx->swapchain, NULL);
+	vkDestroyDevice(og_ctx->logical_device, NULL);
+	vkDestroySurfaceKHR(og_ctx->instance, og_ctx->surface, NULL);
+
+	glfwDestroyWindow(og_ctx->window);
+	vkDestroyInstance(og_ctx->instance, NULL);
+	glfwTerminate();
+}
+
+OG_INT static VKAPI_ATTR VkBool32 VKAPI_CALL __debug_callback(
 		VkDebugUtilsMessageSeverityFlagBitsEXT msgSeverity,
 		VkDebugUtilsMessageTypeFlagsEXT msgType,
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
@@ -16,7 +116,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL __debug_callback(
 	return false;
 }
 
-void _init_window(OGContext *og_ctx, OGConfig *og_cfg) {
+OG_INT void _init_window(OGContext *og_ctx, OGConfig *og_cfg) {
 	if (glfwInit() != GLFW_TRUE) {
 		OG_LOG_ERR("GLFW Initialization Failed");
 	}
@@ -32,7 +132,7 @@ void _init_window(OGContext *og_ctx, OGConfig *og_cfg) {
 	}
 }
 
-void _init_vulkan(OGContext *og_ctx, OGConfig *og_cfg) {
+OG_INT void _init_vulkan(OGContext *og_ctx, OGConfig *og_cfg) {
 	VkApplicationInfo app_info = {};
 	app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	app_info.pApplicationName = og_cfg->app_name;
@@ -78,17 +178,16 @@ void _init_vulkan(OGContext *og_ctx, OGConfig *og_cfg) {
 	}
 }
 
-void _create_surface(OGContext *og_ctx) {
+OG_INT void _create_surface(OGContext *og_ctx) {
 	OG_CHECK_VK(glfwCreateWindowSurface(og_ctx->instance, og_ctx->window, NULL, &og_ctx->surface), "Window Surface Creation Failed");
 }
 
-void _handle_default_events(OGContext *og_ctx) {
+OG_INT void _handle_default_events(OGContext *og_ctx) {
 	if (glfwGetKey(og_ctx->window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
 		og_ctx->running = false;
 	}
 }
-
-void _choose_physical_device(OGContext *og_ctx) {
+OG_INT void _choose_physical_device(OGContext *og_ctx) {
 	og_ctx->graphics_idx = -1;
 
 	uint32_t pd_count = 0;
@@ -125,7 +224,7 @@ void _choose_physical_device(OGContext *og_ctx) {
 	}
 }
 
-void _create_logical_device(OGContext *og_ctx) {
+OG_INT void _create_logical_device(OGContext *og_ctx) {
 	const char* extensions[1] = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME
 	};
@@ -150,7 +249,7 @@ void _create_logical_device(OGContext *og_ctx) {
 	vkGetDeviceQueue(og_ctx->logical_device, og_ctx->graphics_idx, 0, &og_ctx->graphics_queue);
 }
 
-void _create_swapchain(OGContext *og_ctx) {
+OG_INT void _create_swapchain(OGContext *og_ctx) {
 	VkSurfaceCapabilitiesKHR surf_caps = {};
 	OG_CHECK_VK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(og_ctx->physical_device,
 				og_ctx->surface, &surf_caps), "Surface Capabilities Not Available");
@@ -216,90 +315,21 @@ void _create_swapchain(OGContext *og_ctx) {
 	vkGetSwapchainImagesKHR(og_ctx->logical_device, og_ctx->swapchain, &sc_img_count, og_ctx->sc_images);
 }
 
-void og_init(OGContext *og_ctx, OGConfig *og_cfg) {
-	_init_window(og_ctx, og_cfg);
-	_init_vulkan(og_ctx, og_cfg);
-	_create_surface(og_ctx);
-
-	_choose_physical_device(og_ctx);
-	_create_logical_device(og_ctx);
-
-	_create_swapchain(og_ctx);
-	_create_command_pool(og_ctx);
-
-	og_ctx->running = true;
-}
-
-void _create_command_pool(OGContext *og_ctx) {
+OG_INT void _create_command_pool(OGContext *og_ctx) {
 	VkCommandPoolCreateInfo pool_create_info = {};
 	pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 	pool_create_info.queueFamilyIndex = og_ctx->graphics_idx;
 
-	OG_CHECK_VK(vkCreateCommandPool(og_ctx->logical_device, &pool_create_info, NULL, &og_ctx->command_pool), "Command Pool Creation Failed");
+	OG_CHECK_VK(vkCreateCommandPool(og_ctx->logical_device, &pool_create_info, NULL,
+				&og_ctx->command_pool), "Command Pool Creation Failed");
 }
 
-void og_render(OGContext *og_ctx /* Function Pointer to Render */) {
-	uint32_t img_idx = 0;
-	
-	OG_CHECK_VK(vkAcquireNextImageKHR(og_ctx->logical_device, og_ctx->swapchain, 0, 0, 0, &img_idx), "Image Acquisition Failed");
+OG_INT void _create_sync_objects(OGContext *og_ctx) {
+	VkSemaphoreCreateInfo sem_create_info = {};
+	sem_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-	VkCommandBufferAllocateInfo cmd_alloc_info = {};
-	cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	cmd_alloc_info.commandBufferCount = 1;
-	cmd_alloc_info.commandPool = og_ctx->command_pool;
-	cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
-	VkCommandBuffer cmd_buffer = NULL;
-	OG_CHECK_VK(vkAllocateCommandBuffers(og_ctx->logical_device, &cmd_alloc_info, &cmd_buffer), "Command Buffer Allocation Failed");
-
-	VkCommandBufferBeginInfo cb_begin_info = {};
-	cb_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	cb_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	
-	OG_CHECK_VK(vkBeginCommandBuffer(cmd_buffer, &cb_begin_info), "Command Buffer Begin Failed");
-
-	// Rendering
-	{
-		// custom_render();
-	}
-
-	OG_CHECK_VK(vkEndCommandBuffer(cmd_buffer), "Command Buffer End Failed");
-
-	VkSubmitInfo submit_info = {};
-	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submit_info.commandBufferCount = 1;
-	submit_info.pCommandBuffers = &cmd_buffer;
-
-	OG_CHECK_VK(vkQueueSubmit(og_ctx->graphics_queue, 1, &submit_info, 0), "Queue Submit Failed");
-
-
-	VkPresentInfoKHR present_info = {};
-	present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-	present_info.pSwapchains = &og_ctx->swapchain;
-	present_info.swapchainCount = 1;
-	present_info.pImageIndices = &img_idx;
-
-	OG_CHECK_VK(vkQueuePresentKHR(og_ctx->graphics_queue, &present_info), "Queue Present Failed");
-
-	vkDeviceWaitIdle(og_ctx->logical_device);
-	vkFreeCommandBuffers(og_ctx->logical_device, og_ctx->command_pool, 1, &cmd_buffer);
-}
-
-
-void og_poll_events(OGContext *og_ctx) {
-	glfwPollEvents();
-
-	_handle_default_events(og_ctx);
-}
-
-void og_quit(OGContext *og_ctx) {
-	vkDestroyCommandPool(og_ctx->logical_device, og_ctx->command_pool, NULL);
-
-	vkDestroySwapchainKHR(og_ctx->logical_device, og_ctx->swapchain, NULL);
-	vkDestroyDevice(og_ctx->logical_device, NULL);
-	vkDestroySurfaceKHR(og_ctx->instance, og_ctx->surface, NULL);
-
-	glfwDestroyWindow(og_ctx->window);
-	vkDestroyInstance(og_ctx->instance, NULL);
-	glfwTerminate();
+	OG_CHECK_VK(vkCreateSemaphore(og_ctx->logical_device, &sem_create_info,
+				NULL, &og_ctx->acquire_img_semaphore), "Acquire Image Semaphore Creation Failed");
+	OG_CHECK_VK(vkCreateSemaphore(og_ctx->logical_device, &sem_create_info,
+				NULL, &og_ctx->submit_semaphore), "Submit Semaphore Creation Failed");
 }
