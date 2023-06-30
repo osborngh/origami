@@ -17,9 +17,15 @@
 #define OG_API
 #define OG_INT
 
+// #define OG_DEBUG_STRINGS 1 // Human Readable Debugging
+
+#ifdef OG_DEBUG_STRINGS
 #define OG_CHECK_VK(val, msg) \
 	if (val != VK_SUCCESS) \
-	printf("[VK_ERROR]: %s [CODE]: %d\n", msg, val); \
+	printf("[VK_ERROR]: %s [CODE]: %d\n", msg, val);
+#else
+#define OG_CHECK_VK
+#endif
 
 #define OG_LOG_ERR(msg) \
 	printf("[ERROR]: %s\n", msg); \

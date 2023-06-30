@@ -3,6 +3,8 @@
 #define WIDTH 800
 #define HEIGHT 600
 
+// #define OG_DEBUG_STRINGS // Human Readable Text For Debugging
+
 void render();
 
 int main() {
@@ -21,7 +23,7 @@ int main() {
 		og_poll_events(p_ctx);
 		og_render(p_ctx, render);
 	}
-	vkDeviceWaitIdle(p_ctx->logical_device);
+	// vkDeviceWaitIdle(p_ctx->logical_device);
 	og_quit(p_ctx);
 }
 

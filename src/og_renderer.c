@@ -4,7 +4,28 @@
 
 #include "origami/og_renderer.h"
 #include "origami/common.h"
-#include <vulkan/vulkan_core.h>
+
+OG_INT void __alloc_cmd_buffer(OGContext *og_ctx) {
+	VkCommandBufferAllocateInfo cmd_alloc_info = {};
+	cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	cmd_alloc_info.commandBufferCount = 1;
+	cmd_alloc_info.commandPool = og_ctx->command_pool;
+	cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+	OG_CHECK_VK(vkAllocateCommandBuffers(og_ctx->logical_device,
+				&cmd_alloc_info, &og_ctx->curr_cmd_buffer), "Command Buffer Allocation Failed");
+
+}
+
+OG_INT static VKAPI_ATTR VkBool32 VKAPI_CALL __debug_callback(
+		VkDebugUtilsMessageSeverityFlagBitsEXT msgSeverity,
+		VkDebugUtilsMessageTypeFlagsEXT msgType,
+		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+		void *pUserData) {
+	OG_LOG_INFOVAR("VALIDATION ERROR", pCallbackData->pMessage);
+	return false;
+}
+
 
 OG_API void og_init(OGContext *og_ctx, OGConfig *og_cfg) {
 	_init_window(og_ctx, og_cfg);
@@ -15,8 +36,12 @@ OG_API void og_init(OGContext *og_ctx, OGConfig *og_cfg) {
 	_create_logical_device(og_ctx);
 
 	_create_swapchain(og_ctx);
-	_create_command_pool(og_ctx);
+	_create_render_pass(og_ctx);
+	_create_framebuffer(og_ctx);
 
+	_create_pipeline(og_ctx);
+
+	_create_command_pool(og_ctx);
 	_create_sync_objects(og_ctx);
 
 	og_ctx->running = true;
@@ -32,17 +57,12 @@ OG_API void og_clear_screen(OGContext *og_ctx, OGColor color) {
 			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &color, 1, &range);
 }
 
+
 OG_API void og_render(OGContext *og_ctx, void (*render)(OGContext*)) {
-	OG_CHECK_VK(vkAcquireNextImageKHR(og_ctx->logical_device, og_ctx->swapchain, 0, og_ctx->acquire_img_semaphore, 0, &og_ctx->img_idx), "Image Acquisition Failed");
+	OG_CHECK_VK(vkAcquireNextImageKHR(og_ctx->logical_device, og_ctx->swapchain,
+				0, og_ctx->acquire_img_semaphore, 0, &og_ctx->img_idx), "Image Acquisition Failed");
 
-	VkCommandBufferAllocateInfo cmd_alloc_info = {};
-	cmd_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	cmd_alloc_info.commandBufferCount = 1;
-	cmd_alloc_info.commandPool = og_ctx->command_pool;
-	cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
-	OG_CHECK_VK(vkAllocateCommandBuffers(og_ctx->logical_device,
-				&cmd_alloc_info, &og_ctx->curr_cmd_buffer), "Command Buffer Allocation Failed");
+	__alloc_cmd_buffer(og_ctx);
 
 	VkCommandBufferBeginInfo cb_begin_info = {};
 	cb_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -50,11 +70,27 @@ OG_API void og_render(OGContext *og_ctx, void (*render)(OGContext*)) {
 	
 	OG_CHECK_VK(vkBeginCommandBuffer(og_ctx->curr_cmd_buffer, &cb_begin_info), "Command Buffer Begin Failed");
 
-	// Rendering
+	VkExtent2D win_extent = {};
+	win_extent.width = og_ctx->win->size.width;
+	win_extent.height = og_ctx->win->size.height;
+
+	VkClearColorValue color_value = {{1, 1, 1, 1}};
+	VkClearValue clear_value = {};
+	clear_value.color = color_value;
+
+	VkRenderPassBeginInfo rp_begin_info = {};
+	rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	rp_begin_info.renderPass = og_ctx->render_pass;
+	rp_begin_info.renderArea.extent = win_extent;
+	rp_begin_info.framebuffer = og_ctx->framebuffers[og_ctx->img_idx];
+	rp_begin_info.pClearValues = &clear_value;
+	rp_begin_info.clearValueCount = 1;
+
+	vkCmdBeginRenderPass(og_ctx->curr_cmd_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 	{
 		render(og_ctx);
 	}
-
+	OG_CHECK_VK(vkCmdEndRenderPass(og_ctx->curr_cmd_buffer), "Render Pass End Failed");
 	OG_CHECK_VK(vkEndCommandBuffer(og_ctx->curr_cmd_buffer), "Command Buffer End Failed");
 
 	VkPipelineStageFlags wdst_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -82,7 +118,7 @@ OG_API void og_render(OGContext *og_ctx, void (*render)(OGContext*)) {
 
 	OG_CHECK_VK(vkQueuePresentKHR(og_ctx->graphics_queue, &present_info), "Queue Present Failed");
 
-	vkDeviceWaitIdle(og_ctx->logical_device);
+	OG_CHECK_VK(vkDeviceWaitIdle(og_ctx->logical_device));
 	vkFreeCommandBuffers(og_ctx->logical_device, og_ctx->command_pool, 1, &og_ctx->curr_cmd_buffer);
 }
 
@@ -93,26 +129,27 @@ OG_API void og_poll_events(OGContext *og_ctx) {
 }
 
 OG_API void og_quit(OGContext *og_ctx) {
+	vkDestroyCommandPool(og_ctx->logical_device, og_ctx->command_pool, NULL);
 	vkDestroySemaphore(og_ctx->logical_device, og_ctx->acquire_img_semaphore, NULL);
 	vkDestroySemaphore(og_ctx->logical_device, og_ctx->submit_semaphore, NULL);
 
-	vkDestroyCommandPool(og_ctx->logical_device, og_ctx->command_pool, NULL);
+	for (size_t i = 0; i < 5; i++) {
+		vkDestroyFramebuffer(og_ctx->logical_device, og_ctx->framebuffers[i], NULL);
+	}
+
+	vkDestroyRenderPass(og_ctx->logical_device, og_ctx->render_pass, NULL);
+
+	for (size_t i = 0; i < 5; i++) {
+		vkDestroyImageView(og_ctx->logical_device, og_ctx->sc_img_views[i], NULL);
+	}
+
 	vkDestroySwapchainKHR(og_ctx->logical_device, og_ctx->swapchain, NULL);
 	vkDestroyDevice(og_ctx->logical_device, NULL);
 	vkDestroySurfaceKHR(og_ctx->instance, og_ctx->surface, NULL);
-
-	glfwDestroyWindow(og_ctx->window);
 	vkDestroyInstance(og_ctx->instance, NULL);
-	glfwTerminate();
-}
 
-OG_INT static VKAPI_ATTR VkBool32 VKAPI_CALL __debug_callback(
-		VkDebugUtilsMessageSeverityFlagBitsEXT msgSeverity,
-		VkDebugUtilsMessageTypeFlagsEXT msgType,
-		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-		void *pUserData) {
-	OG_LOG_INFOVAR("VALIDATION ERROR", pCallbackData->pMessage);
-	return false;
+	glfwDestroyWindow(og_ctx->win->screen);
+	glfwTerminate();
 }
 
 OG_INT void _init_window(OGContext *og_ctx, OGConfig *og_cfg) {
@@ -122,11 +159,15 @@ OG_INT void _init_window(OGContext *og_ctx, OGConfig *og_cfg) {
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-	
-	og_ctx->window = glfwCreateWindow(og_cfg->win_width,
+
+	og_ctx->win = malloc(sizeof(Win));
+
+	VkExtent2D size = {og_cfg->win_width, og_cfg->win_height};
+	og_ctx->win->size = size;
+	og_ctx->win->screen = glfwCreateWindow(og_cfg->win_width,
 			og_cfg->win_height, og_cfg->app_name, NULL, NULL);
 
-	if (!og_ctx->window) {
+	if (!og_ctx->win->screen) {
 		OG_LOG_ERR("GLFW Window Creation Failed");
 	}
 }
@@ -178,11 +219,11 @@ OG_INT void _init_vulkan(OGContext *og_ctx, OGConfig *og_cfg) {
 }
 
 OG_INT void _create_surface(OGContext *og_ctx) {
-	OG_CHECK_VK(glfwCreateWindowSurface(og_ctx->instance, og_ctx->window, NULL, &og_ctx->surface), "Window Surface Creation Failed");
+	OG_CHECK_VK(glfwCreateWindowSurface(og_ctx->instance, og_ctx->win->screen, NULL, &og_ctx->surface), "Window Surface Creation Failed");
 }
 
 OG_INT void _handle_default_events(OGContext *og_ctx) {
-	if (glfwGetKey(og_ctx->window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+	if (glfwGetKey(og_ctx->win->screen, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
 		og_ctx->running = false;
 	}
 }
@@ -312,6 +353,20 @@ OG_INT void _create_swapchain(OGContext *og_ctx) {
 	vkGetSwapchainImagesKHR(og_ctx->logical_device, og_ctx->swapchain, &sc_img_count, 0);
 
 	vkGetSwapchainImagesKHR(og_ctx->logical_device, og_ctx->swapchain, &sc_img_count, og_ctx->sc_images);
+
+	VkImageViewCreateInfo iv_create_info = {};
+	iv_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	iv_create_info.format = og_ctx->surf_format.format;
+	iv_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	iv_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	iv_create_info.subresourceRange.layerCount = 1;
+	iv_create_info.subresourceRange.levelCount = 1;
+
+	for (uint32_t i = 0; i < OG_ARR_SIZE(og_ctx->sc_img_views); i++) {
+		iv_create_info.image = og_ctx->sc_images[i];
+		OG_CHECK_VK(vkCreateImageView(og_ctx->logical_device, &iv_create_info,
+					NULL, &og_ctx->sc_img_views[i]), "Image View Creation Failed");
+	}
 }
 
 OG_INT void _create_command_pool(OGContext *og_ctx) {
@@ -332,3 +387,57 @@ OG_INT void _create_sync_objects(OGContext *og_ctx) {
 	OG_CHECK_VK(vkCreateSemaphore(og_ctx->logical_device, &sem_create_info,
 				NULL, &og_ctx->submit_semaphore), "Submit Semaphore Creation Failed");
 }
+
+OG_INT void _create_framebuffer(OGContext *og_ctx) {
+	VkFramebufferCreateInfo fb_create_info = {};
+	fb_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+	fb_create_info.width = og_ctx->win->size.width;
+	fb_create_info.height = og_ctx->win->size.height;
+	fb_create_info.renderPass = og_ctx->render_pass;
+	fb_create_info.layers = 1;
+	fb_create_info.attachmentCount = 1;
+
+	for (uint32_t i = 0; i < OG_ARR_SIZE(og_ctx->sc_images); i++) {
+		fb_create_info.pAttachments = &og_ctx->sc_img_views[i];
+
+		vkCreateFramebuffer(og_ctx->logical_device, &fb_create_info, NULL, &og_ctx->framebuffers[i]);
+	}
+}
+
+OG_INT void _create_render_pass(OGContext *og_ctx) {
+	VkAttachmentDescription attachment = {};
+	attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	attachment.format = og_ctx->surf_format.format;
+
+	VkAttachmentReference color_attachment_ref = {};
+	color_attachment_ref.attachment = 0;
+	color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkSubpassDescription subpass_desc = {};
+	subpass_desc.colorAttachmentCount = 1;
+	subpass_desc.pColorAttachments = &color_attachment_ref;
+
+
+	VkAttachmentDescription attachments[] = {
+		attachment
+	};
+
+	VkRenderPassCreateInfo rp_create_info = {};
+	rp_create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	rp_create_info.pAttachments =  attachments;
+	rp_create_info.attachmentCount = OG_ARR_SIZE(attachments);
+	rp_create_info.pSubpasses = &subpass_desc;
+	rp_create_info.subpassCount = 1;
+
+	OG_CHECK_VK(vkCreateRenderPass(og_ctx->logical_device,
+				&rp_create_info, NULL, &og_ctx->render_pass), "Render Pass Creation Failed");
+}
+
+
+OG_INT void _create_pipeline(OGContext *og_ctx) {
+}
+
