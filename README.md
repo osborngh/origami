@@ -1,6 +1,6 @@
 # Origami
 
-__Origami__ is a tiny and rather limited game engine built on top of the Vulkan API.
+__Origami__ is a tiny and rather limited 2D game engine built on top of the Vulkan API.
 It is not intended to be used professionally but as learning aid or just another C Vulkan
 codebase to look at (there are not many btw).
 
